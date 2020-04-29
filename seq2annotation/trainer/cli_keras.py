@@ -12,7 +12,7 @@ from tensorflow.python.keras.models import Sequential
 from ioflow.configure import read_configure
 from ioflow.corpus import get_corpus_processor
 from seq2annotation.input import generate_tagset, Lookuper, index_table_from_file
-from seq2annotation.trainer.utils import export_as_deliverable_model
+from seq2annotation.trainer.keras_utils import export_as_deliverable_model
 from seq2annotation.utils import create_dir_if_needed, create_file_dir_if_needed
 from tf_attention_layer.layers.global_attentioin_layer import GlobalAttentionLayer
 from tf_crf_layer.layer import CRF
@@ -52,8 +52,11 @@ def main():
         vocab_data_file = os.path.join(
             os.path.dirname(__file__), "../data/unicode_char_list.txt"
         )
+        print("using default data file: {}".format(vocab_data_file))
+    else:
+        print("using custom vocab data file: {}".format(vocab_data_file))
 
-    vocabulary_lookuper = index_table_from_file(vocab_data_file)
+    vocabulary_lookuper = index_table_from_file(vocab_data_file, config.get("vocabulary_config", {}))
 
     def preprocss(data, maxlen):
         raw_x = []
@@ -161,12 +164,12 @@ def main():
         callbacks=callbacks_list,
     )
 
-    ## Save the model
-    # model.save(create_file_dir_if_needed(config["h5_model_file"]))
+    # Save the model
+    model.save(create_file_dir_if_needed(config["h5_model_file"]))
 
-    # tf.keras.experimental.export_saved_model(
-    #    model, create_dir_if_needed(config["saved_model_dir"])
-    # )
+    tf.keras.experimental.export_saved_model(
+       model, config["saved_model_dir"]
+    )
 
     export_as_deliverable_model(
         create_dir_if_needed(config["deliverable_model_dir"]),

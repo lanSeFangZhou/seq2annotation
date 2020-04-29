@@ -2,8 +2,7 @@ from pathlib import Path
 
 import tensorflow as tf
 import numpy as np
-from seq2annotation.metrics import precision, recall, f1
-from tokenizer_tools.metrics import correct_rate
+from seq2annotation.metrics import precision, recall, f1, correct_rate
 
 
 class Model(object):
@@ -202,12 +201,14 @@ class Model(object):
         data = self.call(embeddings, nwords)
 
         data = self.dropout_layer(data)
-        logits = self.dense_layer(data, num_tags)
 
-        crf_params = tf.get_variable("crf", [num_tags, num_tags], dtype=tf.float32)
+        with tf.name_scope("domain-specific"):
+            logits = self.dense_layer(data, num_tags)
 
-        pred_ids = self.crf_decode_layer(logits, crf_params, nwords)
-        pred_strings = self.id2tag(pred_ids, name="predict")
+            crf_params = tf.get_variable("crf", [num_tags, num_tags], dtype=tf.float32)
+
+            pred_ids = self.crf_decode_layer(logits, crf_params, nwords)
+            pred_strings = self.id2tag(pred_ids, name="predict")
 
         # word_strings = self.id2word(word_ids, name='word_strings')
 
@@ -262,9 +263,10 @@ class Model(object):
                     # return tf.estimator.EstimatorSpec(
                     #     self.mode, loss=loss, eval_metric_ops=metrics, evaluation_hooks=[hook])
 
+
                     return tf.estimator.EstimatorSpec(
                         self.mode, loss=loss, eval_metric_ops=metrics
-                    )
+                        )
 
             elif self.mode == tf.estimator.ModeKeys.TRAIN:
                 train_op = tf.train.AdamOptimizer(
