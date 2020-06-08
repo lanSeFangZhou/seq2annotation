@@ -193,22 +193,22 @@ class Model(object):
         raise NotImplementedError
 
     def __call__(self):
-        indices, num_tags, word_ids, nwords = self.input_layer()
-        # indices, num_tags, word_ids, nwords = self.tpu_input_layer()
-
-        embeddings = self.embedding_layer(word_ids)
-
-        data = self.call(embeddings, nwords)
+        with tf.variable_scope("task_independent"):
+            indices, num_tags, word_ids, nwords = self.input_layer()
+            # indices, num_tags, word_ids, nwords = self.tpu_input_layer()
+            embeddings = self.embedding_layer(word_ids)
+            data = self.call(embeddings, nwords)
 
         data = self.dropout_layer(data)
 
-        with tf.name_scope("domain-specific"):
+        with tf.variable_scope("task_dependent"):
             logits = self.dense_layer(data, num_tags)
 
             crf_params = tf.get_variable("crf", [num_tags, num_tags], dtype=tf.float32)
 
             pred_ids = self.crf_decode_layer(logits, crf_params, nwords)
-            pred_strings = self.id2tag(pred_ids, name="predict")
+
+        pred_strings = self.id2tag(pred_ids, name="predict")
 
         # word_strings = self.id2word(word_ids, name='word_strings')
 
@@ -263,15 +263,45 @@ class Model(object):
                     # return tf.estimator.EstimatorSpec(
                     #     self.mode, loss=loss, eval_metric_ops=metrics, evaluation_hooks=[hook])
 
-
                     return tf.estimator.EstimatorSpec(
                         self.mode, loss=loss, eval_metric_ops=metrics
-                        )
+                    )
 
             elif self.mode == tf.estimator.ModeKeys.TRAIN:
+                optimizer_params = self.params.get("optimizer_params", {})
+                global_step=tf.train.get_or_create_global_step()
+
+                # apply learning rate decay if it's setup already.
+                lr_decay_params = optimizer_params.pop("learning_rate_exp_decay", {})
+                if lr_decay_params:
+                    learning_rate = tf.train.exponential_deacy(
+                        lr_decay_params["learning_rate"],
+                        global_step,
+                        decay_steps=lr_decay_params["lr_decay_steps"],
+                        decay_rate=lr_decay_params["lr_decay_rate"],
+                        staircase=lr_decay_params.get("staircase", True),
+                    )
+                    optimizer_params["learning_rate"] = learning_rate
+
+                var_list = None
+                if self.params["warm_start_dir"] and self.params.get("freeze_embedding", False):
+                    output_vars1 = tf.get_collection(
+                        tf.GraphKeys.TRAINABLE_VARIABLES, scope="task_dependent"
+                    )
+                    output_vars2 = tf.get_collection(
+                        tf.GraphKeys.TRAINABLE_VARIABLES,
+                        scope="task_independent/Variable_1",
+                    )
+                    var_list = [output_vars1, output_vars2]
+
                 train_op = tf.train.AdamOptimizer(
-                    **self.params.get("optimizer_params", {})
-                ).minimize(loss, global_step=tf.train.get_or_create_global_step())
+                    **optimizer_params
+                ).minimize(
+                    loss,
+                    global_step=global_step,
+                    var_list=var_list,
+                )
+
                 if self.params["use_tpu"]:
                     train_op = tf.contrib.tpu.CrossShardOptimizer(train_op)
 
